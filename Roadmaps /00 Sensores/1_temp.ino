@@ -16,9 +16,12 @@ void setup() {
 }
 
 void loop() {
-  // read all the sensor values
+  // Se leen los valores del sensor
   float temperature_Celcius = HTS.readTemperature();
   float humidity    = HTS.readHumidity();
+
+  // Agregamos para que la temperatura también aparezca en grados Fahrenheit
+  float temperature_Fahrenheit = temperature_Celcius * 1.8 + 32;
 
   // Verificar si el rango de valores de temperatura es superior a 0,5 ºC
   // y si el rango de valores de humedad es superior al 1 %
@@ -28,16 +31,19 @@ void loop() {
     old_hum = humidity;
     first_time = false; 
 
-  // print each of the sensor values
-    Serial.print("Temperature = ");
+  // Imprimimos los valores
+    Serial.print("Temperatura en celcius = ");
     Serial.print(temperature_Celcius);
     Serial.println(" °C");
+
+    Serial.print("Temperatura en Fahrenheit = ");
+    Serial.print(temperature_Fahrenheit);
+    Serial.println(" °F");
   
     Serial.print("Humidity    = ");
     Serial.print(humidity);
     Serial.println(" %");
   
-    // print an empty line
     Serial.println();
   }
   delay(1000);
