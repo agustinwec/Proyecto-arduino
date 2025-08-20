@@ -12,9 +12,9 @@ Los objetivos de este proyecto son:
 
 ## imagen de descargar el 
 
-## Creando el programa
+## Configuraciones previas
 
-**1. Configuración**
+**1. Instalacion**
 
 Para empezar, abrimos el [Arduino IDE](https://www.arduino.cc/en/software/).
 
