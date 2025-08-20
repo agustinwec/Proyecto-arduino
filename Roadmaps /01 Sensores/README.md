@@ -271,3 +271,111 @@ Para que los gestos se detecten correctamente, la placa debe estar orientada as�
 -   Cómo usar el sensor APDS-9960 para detectar gestos.
 -   Cómo controlar LEDs de la placa Arduino
 -   Uso de la biblioteca APDS-9960.
+
+
+
+# Captura y Reproducción de Audio con Arduino Nano 33 BLE Sense + Python
+
+## Objetivo
+
+Grabar una muestra de audio desde el micrófono digital del Arduino Nano 33 BLE Sense, transmitirlo por puerto serial a una computadora, guardarlo como archivo  y reproducirlo usando Python. 
+
+## PDM
+El Arduino usa la librería  para capturar audio a 16 kHz en formato mono. Las muestras de audio (16 bits) se envían por el puerto serial como bytes.
+
+## Python 
+Python recibe los datos, reconstruye las muestras, las guarda como archivo  y las reproduce.
+
+### Librerias que vamos a utilizar:
+-   pyserial
+-   numpy
+-   wave
+-   sounddevice
+- PDM (En Arduino IDE)
+
+## Código Arduino:
+
+-   `PDM.begin(1, 16000)` configura el micrófono en mono a 16 kHz.
+-   Las muestras se transmiten como pares de bytes
+
+  ```  cpp
+  #include <PDM.h>
+
+#define BUFFER_SIZE 512
+short sampleBuffer[BUFFER_SIZE];
+volatile int samplesRead;
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);
+
+  PDM.onReceive(onPDMdata);
+  PDM.begin(1, 16000);  // 16kHz, mono
+}
+
+void loop() {
+  if (samplesRead > 0) {
+    Serial.write((byte*)sampleBuffer, samplesRead * 2);  // 16-bit samples
+    samplesRead = 0;
+  }
+}
+
+void onPDMdata() {
+  int bytesAvailable = PDM.available();
+  PDM.read(sampleBuffer, bytesAvailable);
+  samplesRead = bytesAvailable / 2;
+}
+   ```
+
+## Código Python:
+
+Recibe los datos, los convierte en audio y los guarda:
+
+
+
+
+
+```cpp
+import serial, wave, numpy as np, sounddevice as sd
+
+COM_PORT = 'COM3'   # Cambiar según el sistema
+BAUD_RATE = 115200
+SAMPLE_RATE = 16000
+DURATION_SECONDS = 10
+FILENAME = 'grabacion.wav'
+
+ser = serial.Serial(COM_PORT, BAUD_RATE, timeout=1)
+ser.reset_input_buffer()
+
+num_samples = SAMPLE_RATE * DURATION_SECONDS
+audio = []
+
+print("Grabando audio...")
+
+while len(audio) < num_samples:
+    if ser.in_waiting >= 2:
+        low_byte = ser.read(1)
+        high_byte = ser.read(1)
+        sample = int.from_bytes(low_byte + high_byte, byteorder='little', signed=True)
+        audio.append(sample)
+
+ser.close()
+print("✅ Grabación terminada.")
+
+audio_np = np.array(audio, dtype=np.int16)
+
+with wave.open(FILENAME, 'wb') as wf:
+    wf.setnchannels(1)
+    wf.setsampwidth(2)
+    wf.setframerate(SAMPLE_RATE)
+    wf.writeframes(audio_np.tobytes())
+
+print(f"📂 Archivo guardado como: {FILENAME}")
+
+sd.play(audio_np, SAMPLE_RATE)
+sd.wait()
+print("🔊 Reproducción terminada.")
+```
+-   Cada muestra se reconstruye a partir de dos bytes.
+-   El archivo  .wav  se guarda con 1 canal, 16 bits por muestra y 16 kHz.
+-   La reproducción es opcional y se puede desactivar si no se desea.
