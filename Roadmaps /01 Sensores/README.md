@@ -136,3 +136,138 @@ Compilamos y ejecutamos el código. Nos dirigimos a la parte superior derecha y 
  
  - Aprendimos cómo leer valores de temperatura y humedad del sensor **HTS221** usando la [biblioteca HTS221](https://github.com/arduino-libraries/Arduino_HTS221)
  - Aprendimos cómo usar el sensor integrado en la placa Arduino Nano 33 BLE Sense, para medir e imprimir valores de humedad y temperatura del ambiente.
+
+
+
+# Reconocimiento de gestos
+
+## Objetivos
+Los objetivos de este proyecto son:
+
+-   Descubra qué es un sensor APDS9960.
+-   Utilice la biblioteca APDS9960.
+-   Aprenda cómo generar datos sin procesar del sensor Arduino Nano 33 BLE Sense.
+-   Crea tu propio monitor de detección de gestos.
+-   Aprenda a controlar el LED incorporado y el LED RGB mediante gestos con las manos.
+
+## Sensor APDS9960
+El chip **APDS9960** permite medir la proximidad digital y la luz ambiental, así como detectar colores y gestos RGB.
+
+![enter image description here](https://docs.arduino.cc/static/9b60e96cca5c9fe7bba5ddfed3abf760/29114/nano33BS_07_sensor.png)
+
+## Creando el programa
+
+### Biblioteca APDS9960
+
+Para acceder a los datos del módulo APDS9960, necesitamos instalar la biblioteca APDS9960. Hagamos clic en la pestaña **Library** y busquemos la biblioteca **APDS9960** y la instalamos.
+
+
+**Programar**
+incluimos la librería APDS9960 que habíamos instalado
+Y dentro de setup inicializamos 
+
+   ```cpp
+    #include <Arduino_APDS9960.h>
+    void  setup() {
+    }
+    void  loop() {
+    }
+   ```
+
+**Setup**
+En el setup inicializamos: 
+
+ -  Los pines de los LEDs (rojo, verde, azul y el LED integrado).
+-   La comunicación serial  `Serial.begin(9600)`.
+-   El sensor APDS-9960 con `APDS.begin()`
+
+```cpp
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(LEDR, OUTPUT);
+  pinMode(LEDG, OUTPUT);
+  pinMode(LEDB, OUTPUT);
+  //se encienden los LEDs RGB para indicar que están listos.
+  digitalWrite(LEDR, HIGH);
+  digitalWrite(LEDG, HIGH);
+  digitalWrite(LEDB, HIGH);
+
+  Serial.begin(9600);
+  while (!Serial);
+
+  if (!APDS.begin()) {
+    Serial.println("Error initializing APDS-9960 sensor!");
+  }
+
+  Serial.println("Detectando gestos ...");
+}
+```
+**Loop**
+En el loop :
+ 
+
+ - Se verifica si hay un gesto disponible con  **APDS.gestureAvailable()**
+ - Se lee el gesto con **APDS.readGesture()**
+ - Según el gesto detectado, se enciende un **LED** específico por un segundo y se imprime el tipo de gesto en el monitor serial
+
+  ```cpp
+	void loop() {
+	  if (APDS.gestureAvailable()) {
+	   int gesture = APDS.readGesture();
+
+    switch (gesture) {
+      case GESTURE_UP:
+        digitalWrite(LEDR, LOW);
+        delay(1000);
+        digitalWrite(LEDR, HIGH);
+        Serial.println("Gesto hacia arriba detectado");
+        break;
+
+      case GESTURE_DOWN:
+        digitalWrite(LEDG, LOW);
+        delay(1000);
+        digitalWrite(LEDG, HIGH);
+        Serial.println("Gesto hacia abajo detectado");
+        break;
+
+      case GESTURE_LEFT:
+        digitalWrite(LEDB, LOW);
+        delay(1000);
+        digitalWrite(LEDB, HIGH);
+        Serial.println("Gesto hacia la izquierda detectado");
+        break;
+
+      case GESTURE_RIGHT:
+        digitalWrite(LED_BUILTIN, HIGH);
+        delay(1000);
+        digitalWrite(LED_BUILTIN, LOW);
+        Serial.println("Gesto hacia la derecha detectado");
+        break;
+
+      default:
+        break;
+    }
+  }
+}
+   ```
+	
+### Posición de la placa
+
+Para que los gestos se detecten correctamente, la placa debe estar orientada así:
+
+-   **ARRIBA**: del conector USB hacia la antena
+-   **ABAJO**: de la antena hacia el conector USB
+-   **IZQUIERDA**: del lado de los pines analógicos al lado de los pines digitales
+-   **DERECHA**: del lado de los pines digitales al lado de los pines analógicos
+
+### Ejecutar el código ▶️
+
+1.  Subí el código a la placa.
+2.  Abrí el **Serial Monitor** en el IDE de Arduino.
+3.  Realizá gestos frente al sensor y observá los resultados impresos y los LEDs encendidos.
+
+#### Qué aprendimos:
+
+-   Cómo usar el sensor APDS-9960 para detectar gestos.
+-   Cómo controlar LEDs de la placa Arduino
+-   Uso de la biblioteca APDS-9960.
