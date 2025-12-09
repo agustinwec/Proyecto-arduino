@@ -5,56 +5,70 @@ import librosa
 from train_dscnn import DSCNN
 
 # Parámetros
-PORT = "COM3"          # cambiá si tu Arduino está en otro puerto
+PORT = "COM4"
 BAUD = 1000000
 SAMPLE_RATE = 16000
-WINDOW_SIZE = 16000    # 1 segundo
+WINDOW_SIZE = 16000
 
-SILENCE_RMS = 0.01     # umbral de silencio (ajustable)
-CONF_THRESH = 0.02     # umbral de confianza (ajustable)
-
+SILENCE_RMS = 0.003
 device = torch.device("cpu")
+
+# UMBRALES DE DECISIÓN
+TH_SI  = 0.70   # exigencia para SI
+TH_NO  = 0.60   # exigencia para NO
+MARGIN = 0.10   # ventaja mínima
+
+# SUAVIZADO
+MIN_STABLE_WINDOWS = 2    # cuántas ventanas iguales antes de cambiar LED
+SILENCE_WINDOWS    = 3    # cuántas ventanas de silencio para apagar
+
 model = DSCNN(n_classes=2).to(device)
-state = torch.load("dscnn_kws.pth", map_location=device)
+state = torch.load("dscnn_kws_best.pth", map_location=device)
 model.load_state_dict(state)
 model.eval()
 
-CLASSES = ["no", "si"]
+N_MFCC = 40
+N_FFT = 480
+HOP_LEN = 160
+MAX_FRAMES = 49
+
 
 def audio_to_mfcc_from_float(y: np.ndarray) -> np.ndarray:
-    
     mfcc = librosa.feature.mfcc(
         y=y,
         sr=SAMPLE_RATE,
-        n_mfcc=40,
-        n_fft=640,
-        hop_length=320,
+        n_mfcc=N_MFCC,
+        n_fft=N_FFT,
+        hop_length=HOP_LEN,
     )
-    # Ajustar a 49 frames
-    if mfcc.shape[1] < 49:
-        pad = 49 - mfcc.shape[1]
-        mfcc = np.pad(mfcc, ((0, 0), (0, pad)), mode="constant")
-    elif mfcc.shape[1] > 49:
-        mfcc = mfcc[:, :49]
 
+    if mfcc.shape[1] < MAX_FRAMES:
+        pad = MAX_FRAMES - mfcc.shape[1]
+        mfcc = np.pad(mfcc, ((0, 0), (0, pad)), mode="constant")
+    elif mfcc.shape[1] > MAX_FRAMES:
+        mfcc = mfcc[:, :MAX_FRAMES]
 
     mean = mfcc.mean()
     std = mfcc.std() + 1e-6
     mfcc = (mfcc - mean) / std
 
-    mfcc = mfcc[None, None, :, :].astype(np.float32)  # (1,1,40,49)
-    return mfcc
+    return mfcc[None, None, :, :].astype(np.float32)
+
 
 def main():
     ser = serial.Serial(PORT, BAUD, timeout=1)
     ser.reset_input_buffer()
-
-    print(f"Escuchando en {PORT} @ {BAUD} ...")
+    print("Escuchando...")
 
     buffer = np.zeros(0, dtype=np.int16)
 
+    # Estado para suavizar
+    last_instant_label = None   # etiqueta de la ventana anterior ("SI"/"NO")
+    stable_count = 0            # cuántas ventanas seguidas con la misma etiqueta
+    silence_count = 0           # cuántas ventanas seguidas de silencio
+    last_sent_label = None      # última etiqueta enviada al Arduino ("SI"/"NO"/None)
+
     while True:
-        # Leer lo que haya disponible del Arduino
         if ser.in_waiting > 0:
             data = ser.read(ser.in_waiting)
             if len(data) % 2 != 0:
@@ -62,46 +76,71 @@ def main():
             samples = np.frombuffer(data, dtype="<i2")
             buffer = np.concatenate([buffer, samples])
 
-        # Si tenemos al menos 1 segundo
         if buffer.shape[0] >= WINDOW_SIZE:
-            window_int16 = buffer[-WINDOW_SIZE:]    # últimas 16000 muestras
-            buffer = np.zeros(0, dtype=np.int16)    # limpiamos
+            window_int16 = buffer[-WINDOW_SIZE:]
+            buffer = buffer[-WINDOW_SIZE//2:]   # solapamiento 0.5s
 
-            # Pasar a float en [-1,1]
             y = window_int16.astype(np.float32) / 32768.0
 
-            # 1) Detectar SILENCIO
+            # 1) Silencio
             rms = float(np.sqrt(np.mean(y**2)))
             if rms < SILENCE_RMS:
-                # Silencio: no mandamos predicción, apagamos LEDs
-                
-                ser.write(b'0')  # comando para "apagar" en Arduino
-                continue
+                silence_count += 1
+                stable_count = 0
+                last_instant_label = None
 
-            # 2) MFCC + modelo
+                # solo apagamos si estuvo silencioso un rato
+                if silence_count >= SILENCE_WINDOWS and last_sent_label is not None:
+                    ser.write(b'0')
+                    last_sent_label = None
+                continue
+            else:
+                silence_count = 0
+
+            # 2) Modelo
             mfcc = audio_to_mfcc_from_float(y)
             x = torch.from_numpy(mfcc).to(device)
 
             with torch.no_grad():
                 logits = model(x)
                 probs = torch.softmax(logits, dim=1)[0].cpu().numpy()
-                pred_idx = int(np.argmax(probs))
-                max_prob = float(probs[pred_idx])
-                label = CLASSES[pred_idx]
+                p_no = float(probs[0])
+                p_si = float(probs[1])
 
-            # 3) Filtrar por confianza
-            if max_prob < CONF_THRESH:
-                print(f"Inseguro: {label} (p={max_prob:.2f}, rms={rms:.4f}) → ignorado")
-                ser.write(b'0')  # no confiamos, apagamos LEDs
+            # 3) Decisión instantánea 
+            instant_label = None   # "SI" / "NO" / None
+
+            if p_si > TH_SI and (p_si - p_no) > MARGIN:
+                instant_label = "SI"
+            elif p_no > TH_NO and (p_no - p_si) > MARGIN:
+                instant_label = "NO"
+
+            if instant_label is None:
+                # no suficientemente seguro → no cambiamos nada
+                stable_count = 0
+                last_instant_label = None
                 continue
 
-            # 4) Predicción válida → mandar comando al Arduino
-            print(f"Predicción: {label} ") #(p={max_prob:.2f}, rms={rms:.4f})
-
-            if label == "si":
-                ser.write(b'S')   # "si"
+            # 4) Suavizado: necesitamos MIN_STABLE_WINDOWS iguales
+            if instant_label == last_instant_label:
+                stable_count += 1
             else:
-                ser.write(b'N')   # "no"
+                stable_count = 1
+                last_instant_label = instant_label
+
+            # si no llegamos a suficientes ventanas iguales, no cambiamos LED
+            if stable_count < MIN_STABLE_WINDOWS:
+                continue
+
+            # 5) Solo enviamos si es distinto de lo último que mandamos
+            if instant_label != last_sent_label:
+                if instant_label == "SI":
+                    ser.write(b'S')
+                else:
+                    ser.write(b'N')
+                print(instant_label)
+                last_sent_label = instant_label
+
 
 if __name__ == "__main__":
     main()
